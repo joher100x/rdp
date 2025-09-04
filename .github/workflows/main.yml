@@ -1,0 +1,148 @@
+name: "⚡ EnigMano Win11 + 128 Cores Deployment with Tailscale"
+
+on:
+  workflow_dispatch:
+    inputs:
+      INSTANCE:
+        description: "Instance number to deploy (e.g., 1, 2, 3...)"
+        required: true
+        default: "1"
+      TAILSCALE_TAG:
+        description: "Tailscale tag for this instance"
+        required: false
+        default: "enigmano-instance"
+
+jobs:
+  deploy-enigmano:
+    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
+    runs-on: windows-11-arm
+
+    env:
+      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
+      TAILSCALE_TAG: ${{ github.event.inputs.TAILSCALE_TAG }}-${{ github.event.inputs.INSTANCE }}
+      SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+      REPO: ${{ github.repository }}
+      WORKFLOW_FILE: "enigmano-Win-11-128-Cores.yml"
+      DEPLOYMENT_ID: ${{ github.run_id }}
+
+    steps:
+      - name: 📌 Deployment Parameters
+        shell: pwsh
+        run: |
+          $prevInstance = [int]$env:INSTANCE_ID - 1
+          Write-Host "==============================================="
+          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
+          Write-Host "🏷️  Tailscale Tag        : $env:TAILSCALE_TAG"
+          Write-Host "🔢 Previous Instance     : $prevInstance"
+          Write-Host "📦 GitHub Repository     : $env:REPO"
+          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
+          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
+          Write-Host "==============================================="
+
+      - name: 🔐 Validate Secrets
+        shell: pwsh
+        run: |
+          if (-not $env:SECRET_SHAHZAIB) {
+            Write-Error "❌ Missing GitHub Secret: SECRET_SHAHZAIB"
+            exit 1
+          }
+          if (-not $env:TAILSCALE_AUTHKEY) {
+            Write-Error "❌ Missing Tailscale Auth Key: TAILSCALE_AUTHKEY"
+            exit 1
+          }
+          Write-Host "✅ All required secrets validated successfully"
+
+      - name: 📥 Install Tailscale
+        shell: pwsh
+        run: |
+          Write-Host "🔄 Installing Tailscale..."
+          try {
+            # Download and install Tailscale
+            $progressPreference = 'silentlyContinue'
+            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe" -UseBasicParsing
+            Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/S" -Wait -NoNewWindow
+            Write-Host "✅ Tailscale installed successfully"
+          } catch {
+            Write-Error "❌ Failed to install Tailscale: $($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: 🔗 Connect to Tailscale
+        shell: pwsh
+        run: |
+          Write-Host "🔗 Connecting to Tailscale network..."
+          try {
+            # Start Tailscale service
+            Start-Service -Name "Tailscale" -ErrorAction Stop
+            
+            # Connect using auth key
+            & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTHKEY --hostname=$env:TAILSCALE_TAG --accept-routes=true
+            
+            # Get Tailscale IP
+            $tailscaleStatus = & "C:\Program Files\Tailscale\tailscale.exe" status --json
+            $statusData = $tailscaleStatus | ConvertFrom-Json
+            $tailscaleIP = $statusData.Self.TailscaleIPs[0]
+            
+            Write-Host "✅ Connected to Tailscale successfully"
+            Write-Host "🌐 Tailscale IP: $tailscaleIP"
+            Write-Host "🏷️  Device tag: $env:TAILSCALE_TAG"
+            
+            # Set environment variable for future steps
+            echo "TAILSCALE_IP=$tailscaleIP" >> $env:GITHUB_ENV
+          } catch {
+            Write-Error "❌ Failed to connect to Tailscale: $($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: 📥 Download EnigMano-instance.ps1
+        shell: pwsh
+        run: |
+          $url = "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/EnigMano-Instance.ps1"
+          Write-Host "🌐 Downloading EnigMano-Instance.ps1..."
+          try {
+            $progressPreference = 'silentlyContinue'
+            Invoke-WebRequest -Uri $url -OutFile "EnigMano-Instance.ps1" -UseBasicParsing -TimeoutSec 30
+            if (!(Test-Path "./EnigMano-Instance.ps1")) {
+              Write-Error "❌ Failed to download EnigMano-Instance.ps1"
+              exit 1
+            }
+            Write-Host "✅ EnigMano-Instance.ps1 downloaded successfully"
+          } catch {
+            Write-Error "❌ Download failed: $($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: ⚔️ Execute EnigMano Instance Script
+        shell: pwsh
+        run: |
+          Write-Host "🚦 Initiating EnigMano-Instance.ps1"
+          Write-Host "🌐 This instance is accessible via Tailscale IP: $env:TAILSCALE_IP"
+          
+          # Set environment variables for the script
+          $env:INSTANCE_ID = $env:INSTANCE_ID
+          $env:TAILSCALE_IP = $env:TAILSCALE_IP
+          
+          powershell.exe -ExecutionPolicy Bypass -File ".\EnigMano-Instance.ps1"
+
+      - name: 📋 Display Connection Information
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "==============================================="
+          Write-Host "🔗 TAILSCALE CONNECTION INFORMATION"
+          Write-Host "==============================================="
+          Write-Host "Instance ID: $env:INSTANCE_ID"
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host "Tailscale Tag: $env:TAILSCALE_TAG"
+          Write-Host "Access this device using the above Tailscale IP"
+          Write-Host "==============================================="
+
+      - name: 💠 Final Status
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
+          Write-Host "🔗 Connected via Tailscale: $env:TAILSCALE_IP"
+          Write-Host "🔋 Powered by: SHAHZAIB-YT"
+          Write-Host "🏁 EnigMano deployment executed with tactical precision."
